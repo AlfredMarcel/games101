@@ -8,6 +8,7 @@
 #include "rasterizer.hpp"
 #include <opencv2/opencv.hpp>
 #include <math.h>
+#include <cmath>
 
 
 rst::pos_buf_id rst::rasterizer::load_positions(const std::vector<Eigen::Vector3f> &positions)
@@ -42,6 +43,17 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 
 static bool insideTriangle(int x, int y, const Vector3f* _v)
 {   
+    Vector3f p;
+    p<<x+0.5,y+0.5,0;
+    
+    // std::cout<<p<<"\n";
+    // std::cout<<tri[0]<<" "<<tri[1]<<" "<<tri[2]<<"\n";
+
+    Vector3f p1 = (p-_v[0]).cross(_v[1]-_v[0]);
+    Vector3f p2 = (p-_v[1]).cross(_v[2]-_v[1]);
+    Vector3f p3 = (p-_v[2]).cross(_v[0]-_v[2]);
+
+    return p1.dot(p2)>0&&p1.dot(p3)>0&&p2.dot(p3)>0;
     // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
 }
 
@@ -86,8 +98,9 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
         for (int i = 0; i < 3; ++i)
         {
             t.setVertex(i, v[i].head<3>());
-            t.setVertex(i, v[i].head<3>());
-            t.setVertex(i, v[i].head<3>());
+            // maybe only do once is ok
+            // t.setVertex(i, v[i].head<3>());
+            // t.setVertex(i, v[i].head<3>());
         }
 
         auto col_x = col[i[0]];
@@ -108,6 +121,39 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     
     // TODO : Find out the bounding box of current triangle.
     // iterate through the pixel and find if the current pixel is inside the triangle
+
+    float x_min = std::min(t.v[0][0],std::min(t.v[1][0],t.v[2][0]));
+    float x_max = std::max(t.v[0][0],std::max(t.v[1][0],t.v[2][0]));
+    float y_min = std::min(t.v[0][1],std::min(t.v[1][1],t.v[2][1]));
+    float y_max = std::max(t.v[0][1],std::max(t.v[1][1],t.v[2][1]));
+    
+    int lx = int(x_min), ly = int(y_min);
+    int rx = int(x_max)+1, ry = int(y_max)+1;
+
+    Vector3f vv[3];
+    for(int i=0;i<3;i++){
+        vv[i] = t.v[i];
+        // really need?  really need! 
+        vv[i].coeffRef(2)=0;
+    }
+
+    for(int x =lx;x<=rx;x++){
+        for(int y = ly;y<=ry;y++){
+            if(insideTriangle(x,y,vv)){
+                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
+                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                z_interpolated *= w_reciprocal;
+                
+                // compare with depth_buffer
+                if(z_interpolated<depth_buf[get_index(x,y)]){
+                    depth_buf[get_index(x,y)]=z_interpolated;
+                    frame_buf[get_index(x,y)]=t.getColor();
+                }
+            }
+        }
+    }
+    
 
     // If so, use the following code to get the interpolated z value.
     //auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);

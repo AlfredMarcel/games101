@@ -41,10 +41,10 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 }
 
 
-static bool insideTriangle(int x, int y, const Vector3f* _v)
+static bool insideTriangle(float x, float y, const Vector3f* _v)
 {   
     Vector3f p;
-    p<<x+0.5,y+0.5,0;
+    p<<x,y,0;
     
     // std::cout<<p<<"\n";
     // std::cout<<tri[0]<<" "<<tri[1]<<" "<<tri[2]<<"\n";
@@ -59,6 +59,7 @@ static bool insideTriangle(int x, int y, const Vector3f* _v)
 
 static std::tuple<float, float, float> computeBarycentric2D(float x, float y, const Vector3f* v)
 {
+    // compute only use (x,y), 2d point's barycentric
     float c1 = (x*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*y + v[1].x()*v[2].y() - v[2].x()*v[1].y()) / (v[0].x()*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*v[0].y() + v[1].x()*v[2].y() - v[2].x()*v[1].y());
     float c2 = (x*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*y + v[2].x()*v[0].y() - v[0].x()*v[2].y()) / (v[1].x()*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*v[1].y() + v[2].x()*v[0].y() - v[0].x()*v[2].y());
     float c3 = (x*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*y + v[0].x()*v[1].y() - v[1].x()*v[0].y()) / (v[2].x()*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*v[2].y() + v[0].x()*v[1].y() - v[1].x()*v[0].y());
@@ -115,6 +116,15 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
     }
 }
 
+Eigen::Vector3f rst::rasterizer::cal_color(int x,int y){
+    Eigen::Vector3f sum = Eigen::Vector3f::Zero();
+    for(int loc=0;loc<4;loc++){
+        sum += depth_buf[get_depth_index(x,y,loc)].second;
+    }
+    sum = sum/4;
+    return sum; 
+}
+
 //Screen space rasterization
 void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     auto v = t.toVector4();
@@ -137,20 +147,25 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
         vv[i].coeffRef(2)=0;
     }
 
+    std::vector<float> dx = {0.25,0.25,0.75,0.75};
+    std::vector<float> dy = {0.25,0.75,0.25,0.75};
     for(int x =lx;x<=rx;x++){
         for(int y = ly;y<=ry;y++){
-            if(insideTriangle(x,y,vv)){
-                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
-                float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-                z_interpolated *= w_reciprocal;
-                
-                // compare with depth_buffer
-                if(z_interpolated<depth_buf[get_index(x,y)]){
-                    depth_buf[get_index(x,y)]=z_interpolated;
-                    frame_buf[get_index(x,y)]=t.getColor();
+            for(int loc = 0;loc<4;loc++){
+                float px = x + dx[loc];
+                float py = y + dy[loc];
+                if(insideTriangle(px,py,vv)){
+                    auto[alpha, beta, gamma] = computeBarycentric2D(px, py, t.v);
+                    float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                    float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                    z_interpolated *= w_reciprocal;
+                    if(z_interpolated<depth_buf[get_depth_index(x,y,loc)].first){
+                        depth_buf[get_depth_index(x,y,loc)].first=z_interpolated;
+                        depth_buf[get_depth_index(x,y,loc)].second=t.getColor();
+                    }
                 }
             }
+            frame_buf[get_index(x,y)]=cal_color(x,y);
         }
     }
     
@@ -187,19 +202,26 @@ void rst::rasterizer::clear(rst::Buffers buff)
     }
     if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth)
     {
-        std::fill(depth_buf.begin(), depth_buf.end(), std::numeric_limits<float>::infinity());
+        for(auto p = depth_buf.begin();p!=depth_buf.end();p++){
+            p->first = std::numeric_limits<float>::infinity();
+            p->second = Eigen::Vector3f::Zero();
+        }
     }
 }
 
 rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 {
     frame_buf.resize(w * h);
-    depth_buf.resize(w * h);
+    depth_buf.resize(2*w * 2*h);
 }
 
 int rst::rasterizer::get_index(int x, int y)
 {
     return (height-1-y)*width + x;
+}
+
+int rst::rasterizer::get_depth_index(int x,int y,int loc){
+    return ((height-1-y)*width+x)*4+loc;
 }
 
 void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color)

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include "global.hpp"
 #include "Triangle.hpp"
+
 using namespace Eigen;
 
 namespace rst
@@ -92,8 +93,10 @@ namespace rst
 
         std::vector<Eigen::Vector3f> frame_buf;
 
-        std::vector<float> depth_buf;
+        std::vector<std::pair<float,Eigen::Vector3f>> depth_buf;
         int get_index(int x, int y);
+        int get_depth_index(int x,int y,int loc);
+        Eigen::Vector3f cal_color(int x, int y);
 
         int width, height;
 

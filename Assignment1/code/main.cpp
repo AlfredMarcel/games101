@@ -81,7 +81,6 @@ Eigen::Matrix4f get_projection_matrix(float eye_fov, float aspect_ratio,
     // Create the projection matrix for the given parameters.
     // Then return it.
 
-    return projection;
 }
 
 int main(int argc, const char** argv)

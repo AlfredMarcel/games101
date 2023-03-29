@@ -158,7 +158,7 @@ static bool insideTriangle(int x, int y, const Vector4f* _v){
     f1 = v[2].cross(v[1]);
     f2 = v[0].cross(v[2]);
     Vector3f p(x,y,1.);
-    if((p.dot(f0)*f0.dot(v[2])>0) && (p.dot(f1)*f1.dot(v[0])>0) && (p.dot(f2)*f2.dot(v[1])>0))
+    if((p.dot(f0)*f0.dot(v[2])>=0) && (p.dot(f1)*f1.dot(v[0])>=0) && (p.dot(f2)*f2.dot(v[1])>=0))
         return true;
     return false;
 }
@@ -172,6 +172,7 @@ static std::tuple<float, float, float> computeBarycentric2D(float x, float y, co
 
 void rst::rasterizer::draw(std::vector<Triangle *> &TriangleList) {
 
+    // (far-near)/2
     float f1 = (50 - 0.1) / 2.0;
     float f2 = (50 + 0.1) / 2.0;
 
@@ -188,6 +189,7 @@ void rst::rasterizer::draw(std::vector<Triangle *> &TriangleList) {
 
         std::array<Eigen::Vector3f, 3> viewspace_pos;
 
+        // vertices which only do model and view transformations
         std::transform(mm.begin(), mm.end(), viewspace_pos.begin(), [](auto& v) {
             return v.template head<3>();
         });
@@ -260,14 +262,51 @@ static Eigen::Vector2f interpolate(float alpha, float beta, float gamma, const E
 void rst::rasterizer::rasterize_triangle(const Triangle& t, const std::array<Eigen::Vector3f, 3>& view_pos) 
 {
     // TODO: From your HW3, get the triangle rasterization code.
-    // TODO: Inside your rasterization loop:
-    //    * v[i].w() is the vertex view space depth value z.
-    //    * Z is interpolated view space depth for the current pixel
-    //    * zp is depth between zNear and zFar, used for z-buffer
 
-    // float Z = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-    // float zp = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-    // zp *= Z;
+    float x_min = std::min(t.v[0][0],std::min(t.v[1][0],t.v[2][0]));
+    float x_max = std::max(t.v[0][0],std::max(t.v[1][0],t.v[2][0]));
+    float y_min = std::min(t.v[0][1],std::min(t.v[1][1],t.v[2][1]));
+    float y_max = std::max(t.v[0][1],std::max(t.v[1][1],t.v[2][1]));
+    
+    int lx = int(x_min), ly = int(y_min);
+    int rx = int(x_max)+1, ry = int(y_max)+1;
+
+    for(int x =lx;x<=rx;x++){
+        for(int y = ly;y<=ry;y++){
+            if(insideTriangle(x,y,t.v)){
+                // calculate pixel's bary coord in triangle.
+                auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
+                
+                // 3d z_val 
+                float z0 = 1/(alpha / t.v[0].w() + beta / t.v[1].w() + gamma / t.v[2].w());
+                // std::cout<<alpha<<" "<<beta<<" "<<gamma<<"\n";
+                // interpolation for(x,y,z). 
+                
+                // interpolation for...
+                auto color_interpolated = interpolate(alpha/t.v[0].w(),beta/t.v[1].w(),gamma/t.v[2].w(),t.color[0],t.color[1],t.color[2],1/z0);
+                auto normal_interpolated = interpolate(alpha/t.v[0].w(),beta/t.v[1].w(),gamma/t.v[2].w(),t.normal[0],t.normal[1],t.normal[2],1/z0);
+                auto texcoords_interpolated = interpolate(alpha/t.v[0].w(),beta/t.v[1].w(),gamma/t.v[2].w(),t.tex_coords[0],t.tex_coords[1],t.tex_coords[2],1/z0); 
+                auto shadingcoord_interpolated = interpolate(alpha/t.v[0].w(),beta/t.v[1].w(),gamma/t.v[2].w(),view_pos[0],view_pos[1],view_pos[2],1/z0);
+
+                fragment_shader_payload payload(color_interpolated,normal_interpolated,texcoords_interpolated,texture ? &*texture : nullptr);
+                
+                // interpolated original 3d coord, used for shading 
+                payload.view_pos = shadingcoord_interpolated;
+
+                //z-buffer
+                if(z0<depth_buf[get_index(x,y)]){
+                    // set_pixel(Vector2i(x,y),color_interpolated*255);
+                    // std::cout<<color;
+
+                    // use shader to calculate color   phong shading
+                    auto pixel_color = fragment_shader(payload);
+                    set_pixel(Vector2i(x,y),pixel_color);
+                    depth_buf[get_index(x,y)]=z0;
+                    // std::cout<<"draw"<<x<<" "<<y<<"\n";
+                }
+            }
+        }
+    }
 
     // TODO: Interpolate the attributes:
     // auto interpolated_color

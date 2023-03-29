@@ -50,7 +50,17 @@ Eigen::Matrix4f get_model_matrix(float angle)
 Eigen::Matrix4f get_projection_matrix(float eye_fov, float aspect_ratio, float zNear, float zFar)
 {
     // TODO: Use the same projection matrix from the previous assignments
+    Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+    float fy = 1.0/tan(eye_fov/2/180*MY_PI);
+    float fx = fy/aspect_ratio;
+    float c = -(zNear+zFar)/(zFar-zNear);
+    float d = -2*zNear*zFar/(zFar-zNear);
 
+    Eigen::Matrix4f translate;
+    translate << fx, 0, 0, 0, 0, fy, 0, 0, 0, 0, c, d, 0, 0, -1, 0; 
+
+    projection = translate * projection;
+    return projection;
 }
 
 Eigen::Vector3f vertex_shader(const vertex_shader_payload& payload)
@@ -63,6 +73,7 @@ Eigen::Vector3f normal_fragment_shader(const fragment_shader_payload& payload)
     Eigen::Vector3f return_color = (payload.normal.head<3>().normalized() + Eigen::Vector3f(1.0f, 1.0f, 1.0f)) / 2.f;
     Eigen::Vector3f result;
     result << return_color.x() * 255, return_color.y() * 255, return_color.z() * 255;
+    // if(return_color.x()==0||return_color.y()==0||return_color.z()==0)std::cout<<payload.normal.head<3>().normalized();
     return result;
 }
 
@@ -84,7 +95,8 @@ Eigen::Vector3f texture_fragment_shader(const fragment_shader_payload& payload)
     if (payload.texture)
     {
         // TODO: Get the texture value at the texture coordinates of the current fragment
-
+        auto tex = payload.texture;
+        return_color = tex->getColor(payload.tex_coords.x(),payload.tex_coords.y());
     }
     Eigen::Vector3f texture_color;
     texture_color << return_color.x(), return_color.y(), return_color.z();
@@ -112,8 +124,21 @@ Eigen::Vector3f texture_fragment_shader(const fragment_shader_payload& payload)
     {
         // TODO: For each light source in the code, calculate what the *ambient*, *diffuse*, and *specular* 
         // components are. Then, accumulate that result on the *result_color* object.
+        Eigen::Vector3f ambient = amb_light_intensity.cwiseProduct(ka);
+        
+        Eigen::Vector3f l = light.position - point;
+        float dir = l.norm();
+        l = l/dir;
+        Eigen::Vector3f diffuse = (light.intensity/(dir*dir)).cwiseProduct(kd)*std::max(0.0f,normal.normalized().dot(l));
 
+        Eigen::Vector3f v =(eye_pos - light.position).normalized();
+        Eigen::Vector3f h = (l+v).normalized();
+        Eigen::Vector3f specular = (light.intensity/(dir*dir)).cwiseProduct(ks)*std::pow(std::max(0.0f,normal.normalized().dot(h)),p);
+
+        result_color += (ambient+diffuse+specular);
     }
+
+    // result_color = texture_color/ 255.f;
 
     return result_color * 255.f;
 }
@@ -143,7 +168,18 @@ Eigen::Vector3f phong_fragment_shader(const fragment_shader_payload& payload)
         // TODO: For each light source in the code, calculate what the *ambient*, *diffuse*, and *specular* 
         // components are. Then, accumulate that result on the *result_color* object.
         
+        Eigen::Vector3f l = (light.position - point).normalized();
+        float dir = (light.position - point).norm();
+        Eigen::Vector3f diffuse = (light.intensity/(dir*dir)).cwiseProduct(kd)*std::max(0.0f,normal.normalized().dot(l));
+
+        Eigen::Vector3f v =(eye_pos - light.position).normalized();
+        Eigen::Vector3f h = (l+v).normalized();
+        Eigen::Vector3f specular = (light.intensity/(dir*dir)).cwiseProduct(ks)*std::pow(std::max(0.0f,normal.normalized().dot(h)),p);
+
+        result_color += (diffuse+specular);
     }
+    Eigen::Vector3f ambient = amb_light_intensity.cwiseProduct(ka);
+    result_color +=ambient;
 
     return result_color * 255.f;
 }
@@ -258,6 +294,7 @@ int main(int argc, const char** argv)
             Triangle* t = new Triangle();
             for(int j=0;j<3;j++)
             {
+                // each triangle's vert's coord,normal,texcoord. 
                 t->setVertex(j,Vector4f(mesh.Vertices[i+j].Position.X,mesh.Vertices[i+j].Position.Y,mesh.Vertices[i+j].Position.Z,1.0));
                 t->setNormal(j,Vector3f(mesh.Vertices[i+j].Normal.X,mesh.Vertices[i+j].Normal.Y,mesh.Vertices[i+j].Normal.Z));
                 t->setTexCoord(j,Vector2f(mesh.Vertices[i+j].TextureCoordinate.X, mesh.Vertices[i+j].TextureCoordinate.Y));
@@ -334,6 +371,8 @@ int main(int argc, const char** argv)
 
     while(key != 27)
     {
+        //the framework has problem in interative
+
         r.clear(rst::Buffers::Color | rst::Buffers::Depth);
 
         r.set_model(get_model_matrix(angle));
@@ -350,15 +389,18 @@ int main(int argc, const char** argv)
         cv::imwrite(filename, image);
         key = cv::waitKey(10);
 
+        std::cout << "frame count: " << frame_count++ <<"angle:"<<angle<< '\n';
+
         if (key == 'a' )
         {
-            angle -= 0.1;
+            angle -= 15;
+            std::cout<<angle;
         }
         else if (key == 'd')
         {
-            angle += 0.1;
+            angle += 15;
+            std::cout<<angle;
         }
-
     }
     return 0;
 }
